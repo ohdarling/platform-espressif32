@@ -175,6 +175,23 @@ class ComponentHandler:
             if self.removed_components:
                 self._cleanup_removed_components()
 
+        self._patch_framework_path();
+
+    def _patch_framework_path(self) -> None:
+        build_py_path = join(self.config.arduino_libs_mcu, "pioarduino-build.py")
+
+        try:
+            # print(">>>>>>>> Patch framework lib path\n")
+            with open(build_py_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+
+            content = content.replace('"framework-arduinoespressif32"', '"framework-arduinoespressif32pio"')
+            content = content.replace('"framework-arduinoespressif32-libs"', '"framework-arduinoespressif32pio-libs"')
+            with open(build_py_path, 'w', encoding='utf-8') as f:
+                f.write(content)
+        except Exception:
+            pass
+
     def _process_component_removals(self, component_data: Dict[str, Any]) -> None:
         """
         Process component removal requests from project configuration.
