@@ -64,7 +64,7 @@ terminal_cp = locale.getpreferredencoding().lower()
 PYTHON_EXE = env.subst("$PYTHONEXE")  # Global Python executable path
 
 # Framework directory path
-FRAMEWORK_DIR = platform.get_package_dir("framework-arduinoespressif32")
+FRAMEWORK_DIR = platform.get_package_dir("framework-arduinoespressif32pio")
 
 platformio_dir = projectconfig.get("platformio", "core_dir")
 penv_dir = os.path.join(platformio_dir, "penv")
@@ -132,13 +132,13 @@ if os.path.isfile(python_exe):
 def add_to_pythonpath(path):
     """
     Add a path to the PYTHONPATH environment variable (cross-platform).
-    
+
     Args:
         path (str): The path to add to PYTHONPATH
     """
     # Normalize the path for the current OS
     normalized_path = os.path.normpath(path)
-    
+
     # Add to PYTHONPATH environment variable
     if "PYTHONPATH" in os.environ:
         current_paths = os.environ["PYTHONPATH"].split(os.pathsep)
@@ -147,7 +147,7 @@ def add_to_pythonpath(path):
             os.environ["PYTHONPATH"] = normalized_path + os.pathsep + os.environ.get("PYTHONPATH", "")
     else:
         os.environ["PYTHONPATH"] = normalized_path
-    
+
     # Also add to sys.path for immediate availability
     if normalized_path not in sys.path:
         sys.path.insert(0, normalized_path)
@@ -155,11 +155,11 @@ def add_to_pythonpath(path):
 def setup_python_paths():
     """
     Setup Python paths based on the actual Python executable being used.
-    """    
+    """
     # Get the directory containing the Python executable
     python_dir = os.path.dirname(PYTHON_EXE)
     add_to_pythonpath(python_dir)
-    
+
     # Try to find site-packages directory using the actual Python executable
     result = subprocess.run(
         [PYTHON_EXE, "-c", "import site; print(site.getsitepackages()[0])"],
@@ -178,42 +178,42 @@ setup_python_paths()
 def _get_executable_path(python_exe, executable_name):
     """
     Get the path to an executable binary (esptool, uv, etc.) based on the Python executable path.
-    
+
     Args:
         python_exe (str): Path to Python executable
         executable_name (str): Name of the executable to find (e.g., 'esptool', 'uv')
-        
+
     Returns:
         str: Path to executable or fallback to executable name
     """
-    
+
     python_dir = os.path.dirname(python_exe)
-    
+
     if IS_WINDOWS:
         executable_path = os.path.join(python_dir, f"{executable_name}.exe")
     else:
         # For Unix-like systems, executables are typically in the same directory as python
         # or in a bin subdirectory
         executable_path = os.path.join(python_dir, executable_name)
-        
+
         # If not found in python directory, try bin subdirectory
         if not os.path.isfile(executable_path):
             bin_dir = os.path.join(python_dir, "bin")
             executable_path = os.path.join(bin_dir, executable_name)
-    
+
     if os.path.isfile(executable_path):
         return executable_path
-    
+
     return executable_name  # Fallback to command name
 
 
 def _get_esptool_executable_path(python_exe):
     """
     Get the path to the esptool executable binary.
-    
+
     Args:
         python_exe (str): Path to Python executable
-        
+
     Returns:
         str: Path to esptool executable
     """
@@ -223,10 +223,10 @@ def _get_esptool_executable_path(python_exe):
 def _get_uv_executable_path(python_exe):
     """
     Get the path to the uv executable binary.
-    
+
     Args:
         python_exe (str): Path to Python executable
-        
+
     Returns:
         str: Path to uv executable
     """
@@ -236,11 +236,11 @@ def _get_uv_executable_path(python_exe):
 def get_packages_to_install(deps, installed_packages):
     """
     Generator for Python packages that need to be installed.
-    
+
     Args:
         deps (dict): Dictionary of package names and version specifications
         installed_packages (dict): Dictionary of currently installed packages
-        
+
     Yields:
         str: Package name that needs to be installed
     """
@@ -256,13 +256,13 @@ def get_packages_to_install(deps, installed_packages):
 def install_python_deps():
     """
     Ensure uv package manager is available and install required Python dependencies.
-    
+
     Returns:
         bool: True if successful, False otherwise
     """
     # Get uv executable path
     uv_executable = _get_uv_executable_path(PYTHON_EXE)
-    
+
     try:
         result = subprocess.run(
             [uv_executable, "--version"],
@@ -273,7 +273,7 @@ def install_python_deps():
         uv_available = result.returncode == 0
     except (FileNotFoundError, subprocess.TimeoutExpired):
         uv_available = False
-    
+
     if not uv_available:
         try:
             result = subprocess.run(
@@ -287,17 +287,17 @@ def install_python_deps():
                 if result.stderr:
                     print(f"Error output: {result.stderr.strip()}")
                 return False
-            
+
             # Update uv executable path after installation
             uv_executable = _get_uv_executable_path(PYTHON_EXE)
-            
+
             # Add Scripts directory to PATH for Windows
             if IS_WINDOWS:
                 python_dir = os.path.dirname(PYTHON_EXE)
                 scripts_dir = os.path.join(python_dir, "Scripts")
                 if os.path.isdir(scripts_dir):
                     os.environ["PATH"] = scripts_dir + os.pathsep + os.environ.get("PATH", "")
-                    
+
         except subprocess.TimeoutExpired:
             print("Error: uv installation timed out")
             return False
@@ -308,11 +308,11 @@ def install_python_deps():
             print(f"Error installing uv package manager: {e}")
             return False
 
-    
+
     def _get_installed_uv_packages():
         """
         Get list of installed packages using uv.
-        
+
         Returns:
             dict: Dictionary of installed packages with versions
         """
@@ -327,7 +327,7 @@ def install_python_deps():
                 timeout=30,  # 30 second timeout
                 env=os.environ  # Use modified environment with custom PYTHONPATH
             )
-            
+
             if result_obj.returncode == 0:
                 content = result_obj.stdout.strip()
                 if content:
@@ -338,7 +338,7 @@ def install_python_deps():
                 print(f"Warning: pip list failed with exit code {result_obj.returncode}")
                 if result_obj.stderr:
                     print(f"Error output: {result_obj.stderr.strip()}")
-                
+
         except subprocess.TimeoutExpired:
             print("Warning: uv pip list command timed out")
         except (json.JSONDecodeError, KeyError) as e:
@@ -352,16 +352,16 @@ def install_python_deps():
 
     installed_packages = _get_installed_uv_packages()
     packages_to_install = list(get_packages_to_install(python_deps, installed_packages))
-    
+
     if packages_to_install:
         packages_list = [f"{p}{python_deps[p]}" for p in packages_to_install]
-        
+
         cmd = [
             uv_executable, "pip", "install",
             f"--python={PYTHON_EXE}",
             "--quiet", "--upgrade"
         ] + packages_list
-        
+
         try:
             result = subprocess.run(
                 cmd,
@@ -370,13 +370,13 @@ def install_python_deps():
                 timeout=30,  # 30 second timeout for package installation
                 env=os.environ  # Use modified environment with custom PYTHONPATH
             )
-            
+
             if result.returncode != 0:
                 print(f"Error: Failed to install Python dependencies (exit code: {result.returncode})")
                 if result.stderr:
                     print(f"Error output: {result.stderr.strip()}")
                 return False
-                
+
         except subprocess.TimeoutExpired:
             print("Error: Python dependencies installation timed out")
             return False
@@ -386,7 +386,7 @@ def install_python_deps():
         except Exception as e:
             print(f"Error installing Python dependencies: {e}")
             return False
-    
+
     return True
 
 
@@ -394,14 +394,14 @@ def install_esptool():
     """
     Install esptool from package folder "tool-esptoolpy" using uv package manager.
     Also determines the path to the esptool executable binary.
-    
+
     Returns:
         str: Path to esptool executable, or 'esptool' as fallback
     """
     try:
         subprocess.check_call(
-            [PYTHON_EXE, "-c", "import esptool"], 
-            stdout=subprocess.DEVNULL, 
+            [PYTHON_EXE, "-c", "import esptool"],
+            stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             env=os.environ
         )
@@ -422,11 +422,11 @@ def install_esptool():
 
             esptool_binary_path = _get_esptool_executable_path(PYTHON_EXE)
             return esptool_binary_path
-            
+
         except subprocess.CalledProcessError as e:
             print(f"Warning: Failed to install esptool: {e}")
             return 'esptool'  # Fallback
-    
+
     return 'esptool'  # Fallback
 
 
@@ -441,7 +441,7 @@ def BeforeUpload(target, source, env):
     """
     Prepare the environment before uploading firmware.
     Handles port detection and special upload configurations.
-    
+
     Args:
         target: SCons target
         source: SCons source
@@ -465,10 +465,10 @@ def BeforeUpload(target, source, env):
 def _get_board_memory_type(env):
     """
     Determine the memory type configuration for the board.
-    
+
     Args:
         env: SCons environment object
-        
+
     Returns:
         str: The appropriate memory type string based on board configuration
     """
@@ -491,10 +491,10 @@ def _get_board_memory_type(env):
 def _normalize_frequency(frequency):
     """
     Convert frequency value to normalized string format (e.g., "40m").
-    
+
     Args:
         frequency: Frequency value to normalize
-        
+
     Returns:
         str: Normalized frequency string with 'm' suffix
     """
@@ -505,10 +505,10 @@ def _normalize_frequency(frequency):
 def _get_board_f_flash(env):
     """
     Get the flash frequency for the board.
-    
+
     Args:
         env: SCons environment object
-        
+
     Returns:
         str: Flash frequency string
     """
@@ -519,10 +519,10 @@ def _get_board_f_flash(env):
 def _get_board_f_image(env):
     """
     Get the image frequency for the board, fallback to flash frequency.
-    
+
     Args:
         env: SCons environment object
-        
+
     Returns:
         str: Image frequency string
     """
@@ -536,10 +536,10 @@ def _get_board_f_image(env):
 def _get_board_f_boot(env):
     """
     Get the boot frequency for the board, fallback to flash frequency.
-    
+
     Args:
         env: SCons environment object
-        
+
     Returns:
         str: Boot frequency string
     """
@@ -554,10 +554,10 @@ def _get_board_flash_mode(env):
     """
     Determine the appropriate flash mode for the board.
     Handles special cases for OPI memory types.
-    
+
     Args:
         env: SCons environment object
-        
+
     Returns:
         str: Flash mode string
     """
@@ -574,10 +574,10 @@ def _get_board_boot_mode(env):
     """
     Determine the boot mode for the board.
     Handles special cases for OPI memory types.
-    
+
     Args:
         env: SCons environment object
-        
+
     Returns:
         str: Boot mode string
     """
@@ -591,10 +591,10 @@ def _get_board_boot_mode(env):
 def _parse_size(value):
     """
     Parse size values from various formats (int, hex, K/M suffixes).
-    
+
     Args:
         value: Size value to parse
-        
+
     Returns:
         int: Size in bytes as an integer
     """
@@ -614,10 +614,10 @@ def _parse_partitions(env):
     """
     Parse the partition table CSV file and return partition information.
     Also sets the application offset for the environment.
-    
+
     Args:
         env: SCons environment object
-        
+
     Returns:
         list: List of partition dictionaries
     """
@@ -671,7 +671,7 @@ def _update_max_upload_size(env):
     """
     Update the maximum upload size based on partition table configuration.
     Prioritizes user-specified partition names.
-    
+
     Args:
         env: SCons environment object
     """
@@ -711,10 +711,10 @@ def _update_max_upload_size(env):
 def _to_unix_slashes(path):
     """
     Convert Windows-style backslashes to Unix-style forward slashes.
-    
+
     Args:
         path (str): Path to convert
-        
+
     Returns:
         str: Path with Unix-style slashes
     """
@@ -725,7 +725,7 @@ def fetch_fs_size(env):
     """
     Extract filesystem size and offset information from partition table.
     Sets FS_START, FS_SIZE, FS_PAGE, and FS_BLOCK environment variables.
-    
+
     Args:
         env: SCons environment object
     """
@@ -744,7 +744,7 @@ def fetch_fs_size(env):
         )
         env.Exit(1)
         return
-    
+
     env["FS_START"] = _parse_size(fs["offset"])
     env["FS_SIZE"] = _parse_size(fs["size"])
     env["FS_PAGE"] = int("0x100", 16)
@@ -760,12 +760,12 @@ def fetch_fs_size(env):
 def __fetch_fs_size(target, source, env):
     """
     Wrapper function for fetch_fs_size to be used as SCons emitter.
-    
+
     Args:
         target: SCons target
         source: SCons source
         env: SCons environment object
-        
+
     Returns:
         tuple: (target, source) tuple
     """
@@ -776,7 +776,7 @@ def __fetch_fs_size(target, source, env):
 def check_lib_archive_exists():
     """
     Check if lib_archive is set in platformio.ini configuration.
-    
+
     Returns:
         bool: True if found, False otherwise
     """
@@ -818,8 +818,8 @@ if "INTEGRATION_EXTRA_DATA" not in env:
 
 # Take care of possible whitespaces in path
 objcopy_value = (
-    f'"{esptool_binary_path}"' 
-    if ' ' in esptool_binary_path 
+    f'"{esptool_binary_path}"'
+    if ' ' in esptool_binary_path
     else esptool_binary_path
 )
 # Configure build tools and environment variables
@@ -959,7 +959,7 @@ def firmware_metrics(target, source, env):
     """
     Custom target to run esp-idf-size with support for command line parameters.
     Usage: pio run -t metrics -- [esp-idf-size arguments]
-    
+
     Args:
         target: SCons target
         source: SCons source
@@ -979,14 +979,14 @@ def firmware_metrics(target, source, env):
         print("Make sure the project is built first with 'pio run'")
         return
 
-    try:        
+    try:
         cmd = [PYTHON_EXE, "-m", "esp_idf_size", "--ng"]
-        
+
         # Parameters from platformio.ini
         extra_args = env.GetProjectOption("custom_esp_idf_size_args", "")
         if extra_args:
             cmd.extend(shlex.split(extra_args))
-        
+
         # Command Line Parameter, after --
         cli_args = []
         if "--" in sys.argv:
@@ -1001,17 +1001,17 @@ def firmware_metrics(target, source, env):
 
         # Map-file as last argument
         cmd.append(map_file)
-        
+
         # Debug-Info if wanted
         if env.GetProjectOption("custom_esp_idf_size_verbose", False):
             print(f"Running command: {' '.join(cmd)}")
-        
+
         # Call esp-idf-size with modified environment
         result = subprocess.run(cmd, check=False, capture_output=False, env=os.environ)
-        
+
         if result.returncode != 0:
             print(f"Warning: esp-idf-size exited with code {result.returncode}")
-            
+
     except ImportError:
         print("Error: esp-idf-size module not found.")
         print("Install with: pip install esp-idf-size")
