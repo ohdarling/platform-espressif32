@@ -55,9 +55,9 @@ _PATH_SHORTENING_MESSAGES = {
 
 def get_platform_default_threshold(mcu):
     """
-    Platform-specific max performance default values for 
+    Platform-specific max performance default values for
     INCLUDE_PATH_LENGTH_THRESHOLD
-    These values push the limits for maximum performance and minimal path 
+    These values push the limits for maximum performance and minimal path
     shortening
 
     Args:
@@ -226,7 +226,7 @@ def get_include_path_threshold(env, config, current_env_section):
 
 def get_threshold_info(env, config, current_env_section):
     """
-    Helper function for debug information about max. possible threshold 
+    Helper function for debug information about max. possible threshold
     configuration
 
     Args:
@@ -297,14 +297,14 @@ class PathCache:
     def framework_dir(self):
         if self._framework_dir is None:
             self._framework_dir = self.platform.get_package_dir(
-                "framework-arduinoespressif32")
+                "framework-arduinoespressif32pio")
         return self._framework_dir
 
     @property
     def framework_lib_dir(self):
         if self._framework_lib_dir is None:
             self._framework_lib_dir = self.platform.get_package_dir(
-                "framework-arduinoespressif32-libs")
+                "framework-arduinoespressif32pio-libs")
         return self._framework_lib_dir
 
     @property
@@ -422,8 +422,8 @@ def validate_platformio_path(path: Union[str, Path]) -> bool:
 
         # Must be framework-related
         framework_indicators = [
-            "framework-arduinoespressif32",
-            "framework-arduinoespressif32-libs"
+            "framework-arduinoespressif32pio",
+            "framework-arduinoespressif32pio-libs"
         ]
 
         if not any(indicator in path_str for indicator in framework_indicators):
@@ -567,7 +567,7 @@ FRAMEWORK_LIB_DIR = path_cache.framework_lib_dir
 SConscript("_embed_files.py", exports="env")
 
 flag_any_custom_sdkconfig = exists(join(
-    platform.get_package_dir("framework-arduinoespressif32-libs"),
+    platform.get_package_dir("framework-arduinoespressif32pio-libs"),
     "sdkconfig"))
 
 
@@ -671,7 +671,7 @@ def calculate_include_path_length(includes):
 
 
 def analyze_path_distribution(includes):
-    """Analyze the distribution of include path lengths for optimization 
+    """Analyze the distribution of include path lengths for optimization
     insights"""
     if not includes:
         return {}
@@ -797,7 +797,7 @@ def apply_include_shortening(env, node, includes, total_length):
 
 def smart_include_length_shorten(env, node):
     """
-    Include path shortening based on max. performance configurable threshold 
+    Include path shortening based on max. performance configurable threshold
     with enhanced MCU support
     Uses aggressive thresholds for maximum performance
     """
@@ -821,7 +821,7 @@ def smart_include_length_shorten(env, node):
     if env.get("VERBOSE"):
         debug_framework_paths(env, include_count, total_path_length)
 
-        # Extended debug information about maximum edge threshold 
+        # Extended debug information about maximum edge threshold
         # configuration
         threshold_info = get_threshold_info(env, config, current_env_section)
         print("*** Maximum Threshold Configuration Debug ***")
@@ -862,7 +862,7 @@ if "arduino" in current_env_frameworks and "espidf" in current_env_frameworks:
     # Arduino as component is set, switch off Hybrid compile
     flag_custom_sdkconfig = False
 
-# Framework reinstallation if required - Enhanced with secure deletion and 
+# Framework reinstallation if required - Enhanced with secure deletion and
 # error handling
 if check_reinstall_frwrk():
     # Secure removal of SDKConfig files
@@ -873,9 +873,9 @@ if check_reinstall_frwrk():
     # Secure framework cleanup with enhanced error handling
     if safe_framework_cleanup():
         arduino_frmwrk_url = str(platform.get_package_spec(
-            "framework-arduinoespressif32")).split("uri=", 1)[1][:-1]
+            "framework-arduinoespressif32pio")).split("uri=", 1)[1][:-1]
         arduino_frmwrk_lib_url = str(platform.get_package_spec(
-            "framework-arduinoespressif32-libs")).split("uri=", 1)[1][:-1]
+            "framework-arduinoespressif32pio-libs")).split("uri=", 1)[1][:-1]
         pm.install(arduino_frmwrk_url)
         pm.install(arduino_frmwrk_lib_url)
 

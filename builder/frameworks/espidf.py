@@ -95,8 +95,8 @@ def create_silent_action(action_func):
     return silent_action
 
 if "arduino" in env.subst("$PIOFRAMEWORK"):
-    ARDUINO_FRAMEWORK_DIR = platform.get_package_dir("framework-arduinoespressif32")
-    ARDUINO_FRMWRK_LIB_DIR = platform.get_package_dir("framework-arduinoespressif32-libs")
+    ARDUINO_FRAMEWORK_DIR = platform.get_package_dir("framework-arduinoespressif32pio")
+    ARDUINO_FRMWRK_LIB_DIR = platform.get_package_dir("framework-arduinoespressif32pio-libs")
     if mcu == "esp32c2":
         ARDUINO_FRMWRK_C2_LIB_DIR = join(ARDUINO_FRMWRK_LIB_DIR, mcu)
         if not os.path.exists(ARDUINO_FRMWRK_C2_LIB_DIR):
@@ -111,7 +111,7 @@ if "arduino" in env.subst("$PIOFRAMEWORK"):
         os.rename(ARDUINO_FRAMEWORK_DIR, new_path)
         ARDUINO_FRAMEWORK_DIR = new_path
     assert ARDUINO_FRAMEWORK_DIR and os.path.isdir(ARDUINO_FRAMEWORK_DIR)
-    arduino_libs_mcu = join(platform.get_package_dir("framework-arduinoespressif32-libs"), mcu)
+    arduino_libs_mcu = join(platform.get_package_dir("framework-arduinoespressif32pio-libs"), mcu)
 
 BUILD_DIR = env.subst("$BUILD_DIR")
 PROJECT_DIR = env.subst("$PROJECT_DIR")
@@ -130,7 +130,7 @@ def contains_path_traversal(url):
         '..%2f', '..%5c',  # Mixed
         '%252e%252e%252f',  # Double encoded
     ]
-    
+
     url_lower = url.lower()
     return any(pattern in url_lower for pattern in dangerous_patterns)
 
@@ -151,7 +151,7 @@ def HandleArduinoIDFsettings(env):
     """
     Handles Arduino IDF settings configuration with custom sdkconfig support.
     """
-    
+
     def get_MD5_hash(phrase):
         """Generate MD5 hash for checksum validation."""
         import hashlib
@@ -161,9 +161,9 @@ def HandleArduinoIDFsettings(env):
         """Load custom sdkconfig from file or URL if specified."""
         if not config.has_option("env:" + env["PIOENV"], "custom_sdkconfig"):
             return ""
-        
+
         sdkconfig_entries = env.GetProjectOption("custom_sdkconfig").splitlines()
-        
+
         for file_entry in sdkconfig_entries:
             # Handle HTTP/HTTPS URLs
             if "http" in file_entry and "://" in file_entry:
@@ -181,7 +181,7 @@ def HandleArduinoIDFsettings(env):
                     except UnicodeDecodeError as e:
                         print(f"Error decoding response from {file_entry}: {e}")
                         return ""
-            
+
             # Handle local files
             if "file://" in file_entry:
                 file_ref = file_entry[7:] if file_entry.startswith("file://") else file_entry
@@ -197,7 +197,7 @@ def HandleArduinoIDFsettings(env):
                 else:
                     print("File not found, check path:", file_path)
                     return ""
-        
+
         return ""
 
     def extract_flag_name(line):
@@ -212,24 +212,24 @@ def HandleArduinoIDFsettings(env):
     def build_idf_config_flags():
         """Build complete IDF configuration flags from all sources."""
         flags = []
-        
+
         # Add board-specific flags first
         if "espidf.custom_sdkconfig" in board:
             board_flags = board.get("espidf.custom_sdkconfig", [])
             if board_flags:
                 flags.extend(board_flags)
-        
+
         # Add custom sdkconfig file content
         custom_file_content = load_custom_sdkconfig_file()
         if custom_file_content:
             flags.append(custom_file_content)
-        
+
         # Add project-level custom sdkconfig
         if config.has_option("env:" + env["PIOENV"], "custom_sdkconfig"):
             custom_flags = env.GetProjectOption("custom_sdkconfig").rstrip("\n")
             if custom_flags:
                 flags.append(custom_flags)
-        
+
         return "\n".join(flags) + "\n" if flags else ""
 
     def add_flash_configuration(config_flags):
@@ -238,18 +238,18 @@ def HandleArduinoIDFsettings(env):
             config_flags += "# CONFIG_ESPTOOLPY_FLASHFREQ_80M is not set\n"
             config_flags += f"CONFIG_ESPTOOLPY_FLASHFREQ_{flash_frequency.upper()}=y\n"
             config_flags += f"CONFIG_ESPTOOLPY_FLASHFREQ=\"{flash_frequency}\"\n"
-        
+
         if flash_mode != "qio":
             config_flags += "# CONFIG_ESPTOOLPY_FLASHMODE_QIO is not set\n"
-        
+
         flash_mode_flag = f"CONFIG_ESPTOOLPY_FLASHMODE_{flash_mode.upper()}=y\n"
         if flash_mode_flag not in config_flags:
             config_flags += flash_mode_flag
-        
+
         # ESP32 specific SPIRAM configuration
         if mcu == "esp32" and "CONFIG_FREERTOS_UNICORE=y" in config_flags:
             config_flags += "# CONFIG_SPIRAM is not set\n"
-        
+
         return config_flags
 
     def write_sdkconfig_file(idf_config_flags, checksum_source):
@@ -259,29 +259,29 @@ def HandleArduinoIDFsettings(env):
         """Write the final sdkconfig.defaults file with checksum."""
         sdkconfig_src = join(arduino_libs_mcu, "sdkconfig")
         sdkconfig_dst = join(PROJECT_DIR, "sdkconfig.defaults")
-        
+
         # Generate checksum for validation (maintains original logic)
         checksum = get_MD5_hash(checksum_source.strip() + mcu)
-        
+
         with open(sdkconfig_src, 'r', encoding='utf-8') as src, open(sdkconfig_dst, 'w', encoding='utf-8') as dst:
             # Write checksum header (critical for compilation decision logic)
             dst.write(f"# TASMOTA__{checksum}\n")
-            
+
             processed_flags = set()
-            
+
             # Process each line from source sdkconfig
             for line in src:
                 flag_name = extract_flag_name(line)
-                
+
                 if flag_name is None:
                     dst.write(line)
                     continue
-                
+
                 # Check if we have a custom replacement for this flag
                 flag_replaced = False
                 for custom_flag in idf_config_flags[:]:  # Create copy for safe removal
                     custom_flag_name = extract_flag_name(custom_flag.replace("'", ""))
-                    
+
                     if flag_name == custom_flag_name:
                         cleaned_flag = custom_flag.replace("'", "")
                         dst.write(cleaned_flag + "\n")
@@ -290,10 +290,10 @@ def HandleArduinoIDFsettings(env):
                         processed_flags.add(custom_flag_name)
                         flag_replaced = True
                         break
-                
+
                 if not flag_replaced:
                     dst.write(line)
-            
+
             # Add any remaining new flags
             for remaining_flag in idf_config_flags:
                 cleaned_flag = remaining_flag.replace("'", "")
@@ -305,24 +305,24 @@ def HandleArduinoIDFsettings(env):
         config.has_option("env:" + env["PIOENV"], "custom_sdkconfig") or
         "espidf.custom_sdkconfig" in board
     )
-    
+
     if not has_custom_config:
         return
-    
+
     print("*** Add \"custom_sdkconfig\" settings to IDF sdkconfig.defaults ***")
-    
+
     # Build complete configuration
     idf_config_flags = build_idf_config_flags()
     idf_config_flags = add_flash_configuration(idf_config_flags)
-    
+
     # Convert to list for processing
     idf_config_list = [line for line in idf_config_flags.splitlines() if line.strip()]
-    
+
     # Write final configuration file with checksum
     custom_sdk_config_flags = ""
     if config.has_option("env:" + env["PIOENV"], "custom_sdkconfig"):
         custom_sdk_config_flags = env.GetProjectOption("custom_sdkconfig").rstrip("\n") + "\n"
-    
+
     write_sdkconfig_file(idf_config_list, custom_sdk_config_flags)
 
 
@@ -1496,7 +1496,7 @@ def install_python_deps():
         except (subprocess.CalledProcessError, json.JSONDecodeError, OSError) as e:
             print(f"Warning! Couldn't extract the list of installed Python packages: {e}")
             return {}
-        
+
         for p in packages:
             result[p["name"]] = pepver_to_semver(p["version"])
 
@@ -1533,7 +1533,7 @@ def install_python_deps():
 
     if packages_to_install:
         packages_str = " ".join(['"%s%s"' % (p, deps[p]) for p in packages_to_install])
-        
+
         # Use uv to install packages in the specific Python environment
         env.Execute(
             env.VerboseAction(

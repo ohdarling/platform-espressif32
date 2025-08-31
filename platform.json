@@ -1,6 +1,6 @@
 {
-  "name": "espressif32",
-  "title": "Espressif 32",
+  "name": "espressif32pio",
+  "title": "Espressif 32 PIO",
   "description": "Espressif Systems is a privately held fabless semiconductor company. They provide wireless communications and Wi-Fi chips which are widely used in mobile devices and the Internet of Things applications.",
   "homepage": "https://espressif.com/",
   "license": "Apache-2.0",
@@ -29,13 +29,13 @@
     }
   },
   "packages": {
-    "framework-arduinoespressif32": {
+    "framework-arduinoespressif32pio": {
       "type": "framework",
       "optional": true,
       "owner": "espressif",
       "version": "https://github.com/espressif/arduino-esp32/releases/download/3.3.0/esp32-3.3.0.zip"
     },
-    "framework-arduinoespressif32-libs": {
+    "framework-arduinoespressif32pio-libs": {
       "type": "framework",
       "optional": true,
       "owner": "espressif",
