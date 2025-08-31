@@ -469,6 +469,8 @@ class ComponentHandler:
                 content = f.read()
 
             original_content = content
+            content = content.replace('"framework-arduinoespressif32"', '"framework-arduinoespressif32pio"')
+            content = content.replace('"framework-arduinoespressif32-libs"', '"framework-arduinoespressif32pio-libs"')
 
             # Remove CPPPATH entries for each removed component
             for component in self.removed_components:
