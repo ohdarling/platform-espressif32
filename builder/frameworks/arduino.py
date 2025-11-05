@@ -22,10 +22,10 @@ kinds of creative coding, interactive objects, spaces or physical experiences.
 http://arduino.cc/en/Reference/HomePage
 """
 
-import os
-import sys
-import shutil
 import hashlib
+import os
+import shutil
+import sys
 import threading
 from contextlib import suppress
 from os.path import join, exists, isabs, splitdrive, commonpath, relpath
@@ -35,8 +35,7 @@ from typing import Union, List
 from SCons.Script import DefaultEnvironment, SConscript
 from platformio import fs
 from platformio.package.manager.tool import ToolPackageManager
-
-IS_WINDOWS = sys.platform.startswith("win")
+from platformio.compat import IS_WINDOWS
 
 # Constants for better performance
 UNICORE_FLAGS = {
@@ -55,9 +54,9 @@ _PATH_SHORTENING_MESSAGES = {
 
 def get_platform_default_threshold(mcu):
     """
-    Platform-specific max performance default values for
+    Platform-specific max performance default values for 
     INCLUDE_PATH_LENGTH_THRESHOLD
-    These values push the limits for maximum performance and minimal path
+    These values push the limits for maximum performance and minimal path 
     shortening
 
     Args:
@@ -73,7 +72,7 @@ def get_platform_default_threshold(mcu):
         "esp32": 32000,      # Standard ESP32
         "esp32s2": 32000,    # ESP32-S2
         "esp32s3": 32766,    # ESP32-S3
-        "esp32c3": 30000,    # ESP32-C3
+        "esp32c3": 32000,    # ESP32-C3
         "esp32c2": 32000,    # ESP32-C2
         "esp32c6": 31600,    # ESP32-C6
         "esp32h2": 32000,    # ESP32-H2
@@ -226,7 +225,7 @@ def get_include_path_threshold(env, config, current_env_section):
 
 def get_threshold_info(env, config, current_env_section):
     """
-    Helper function for debug information about max. possible threshold
+    Helper function for debug information about max. possible threshold 
     configuration
 
     Args:
@@ -297,21 +296,21 @@ class PathCache:
     def framework_dir(self):
         if self._framework_dir is None:
             self._framework_dir = self.platform.get_package_dir(
-                "framework-arduinoespressif32pio")
+                "framework-arduinoespressif32")
         return self._framework_dir
 
     @property
     def framework_lib_dir(self):
         if self._framework_lib_dir is None:
             self._framework_lib_dir = self.platform.get_package_dir(
-                "framework-arduinoespressif32pio-libs")
+                "framework-arduinoespressif32-libs")
         return self._framework_lib_dir
 
     @property
     def sdk_dir(self):
         if self._sdk_dir is None:
             self._sdk_dir = fs.to_unix_path(
-                join(self.framework_lib_dir, self.mcu, "include")
+                str(Path(self.framework_lib_dir) / self.mcu / "include")
             )
         return self._sdk_dir
 
@@ -422,8 +421,8 @@ def validate_platformio_path(path: Union[str, Path]) -> bool:
 
         # Must be framework-related
         framework_indicators = [
-            "framework-arduinoespressif32pio",
-            "framework-arduinoespressif32pio-libs"
+            "framework-arduinoespressif32",
+            "framework-arduinoespressif32-libs"
         ]
 
         if not any(indicator in path_str for indicator in framework_indicators):
@@ -507,7 +506,7 @@ def safe_remove_sdkconfig_files():
     envs = [section.replace("env:", "") for section in config.sections()
             if section.startswith("env:")]
     for env_name in envs:
-        file_path = join(project_dir, f"sdkconfig.{env_name}")
+        file_path = str(Path(project_dir) / f"sdkconfig.{env_name}")
         if exists(file_path):
             safe_delete_file(file_path)
 
@@ -566,9 +565,7 @@ FRAMEWORK_LIB_DIR = path_cache.framework_lib_dir
 
 SConscript("_embed_files.py", exports="env")
 
-flag_any_custom_sdkconfig = exists(join(
-    platform.get_package_dir("framework-arduinoespressif32pio-libs"),
-    "sdkconfig"))
+flag_any_custom_sdkconfig = exists(str(Path(FRAMEWORK_LIB_DIR) / "sdkconfig"))
 
 
 def has_unicore_flags():
@@ -599,7 +596,7 @@ def matching_custom_sdkconfig():
     if not flag_any_custom_sdkconfig:
         return True, cust_sdk_is_present
 
-    last_sdkconfig_path = join(project_dir, "sdkconfig.defaults")
+    last_sdkconfig_path = str(Path(project_dir) / "sdkconfig.defaults")
     if not exists(last_sdkconfig_path):
         return False, cust_sdk_is_present
 
@@ -671,7 +668,7 @@ def calculate_include_path_length(includes):
 
 
 def analyze_path_distribution(includes):
-    """Analyze the distribution of include path lengths for optimization
+    """Analyze the distribution of include path lengths for optimization 
     insights"""
     if not includes:
         return {}
@@ -797,7 +794,7 @@ def apply_include_shortening(env, node, includes, total_length):
 
 def smart_include_length_shorten(env, node):
     """
-    Include path shortening based on max. performance configurable threshold
+    Include path shortening based on max. performance configurable threshold 
     with enhanced MCU support
     Uses aggressive thresholds for maximum performance
     """
@@ -821,7 +818,7 @@ def smart_include_length_shorten(env, node):
     if env.get("VERBOSE"):
         debug_framework_paths(env, include_count, total_path_length)
 
-        # Extended debug information about maximum edge threshold
+        # Extended debug information about maximum edge threshold 
         # configuration
         threshold_info = get_threshold_info(env, config, current_env_section)
         print("*** Maximum Threshold Configuration Debug ***")
@@ -862,7 +859,7 @@ if "arduino" in current_env_frameworks and "espidf" in current_env_frameworks:
     # Arduino as component is set, switch off Hybrid compile
     flag_custom_sdkconfig = False
 
-# Framework reinstallation if required - Enhanced with secure deletion and
+# Framework reinstallation if required - Enhanced with secure deletion and 
 # error handling
 if check_reinstall_frwrk():
     # Secure removal of SDKConfig files
@@ -873,9 +870,9 @@ if check_reinstall_frwrk():
     # Secure framework cleanup with enhanced error handling
     if safe_framework_cleanup():
         arduino_frmwrk_url = str(platform.get_package_spec(
-            "framework-arduinoespressif32pio")).split("uri=", 1)[1][:-1]
+            "framework-arduinoespressif32")).split("uri=", 1)[1][:-1]
         arduino_frmwrk_lib_url = str(platform.get_package_spec(
-            "framework-arduinoespressif32pio-libs")).split("uri=", 1)[1][:-1]
+            "framework-arduinoespressif32-libs")).split("uri=", 1)[1][:-1]
         pm.install(arduino_frmwrk_url)
         pm.install(arduino_frmwrk_lib_url)
 
@@ -889,7 +886,7 @@ if check_reinstall_frwrk():
 if flag_custom_sdkconfig and not flag_any_custom_sdkconfig:
     call_compile_libs()
 
-# Main logic for Arduino Framework
+# Arduino framework configuration and build logic
 pioframework = env.subst("$PIOFRAMEWORK")
 arduino_lib_compile_flag = env.subst("$ARDUINO_LIB_COMPILE_FLAG")
 
@@ -901,12 +898,12 @@ if ("arduino" in pioframework and "espidf" not in pioframework and
     component_manager = ComponentManager(env)
     component_manager.handle_component_settings()
     silent_action = env.Action(component_manager.restore_pioarduino_build_py)
-    # hack to silence scons command output
+    # silence scons command output
     silent_action.strfunction = lambda target, source, env: ''
     env.AddPostAction("checkprogsize", silent_action)
 
     if IS_WINDOWS:
         env.AddBuildMiddleware(smart_include_length_shorten)
 
-    build_script_path = join(FRAMEWORK_DIR, "tools", "pioarduino-build.py")
+    build_script_path = str(Path(FRAMEWORK_DIR) / "tools" / "pioarduino-build.py")
     SConscript(build_script_path)

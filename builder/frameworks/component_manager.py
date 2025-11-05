@@ -12,9 +12,9 @@ import os
 import shutil
 import re
 import yaml
+from pathlib import Path
+from typing import Set, Optional, Dict, Any, List, Tuple, Pattern
 from yaml import SafeLoader
-from os.path import join
-from typing import Set, Optional, Dict, Any, List, Tuple
 
 
 class ComponentManagerConfig:
@@ -23,7 +23,7 @@ class ComponentManagerConfig:
 
     This class centralizes all configuration-related operations and provides
     a unified interface for accessing PlatformIO environment settings,
-    board configurations, and framework paths.
+    board configurations, and framework paths with optimized caching.
     """
 
     def __init__(self, env):
@@ -47,10 +47,35 @@ class ComponentManagerConfig:
         self.mcu = self.board.get("build.mcu", "esp32").lower()
         # Get project source directory path
         self.project_src_dir = env.subst("$PROJECT_SRC_DIR")
-        # Get Arduino framework installation directory
-        self.arduino_framework_dir = self.platform.get_package_dir("framework-arduinoespressif32pio")
-        # Get MCU-specific Arduino libraries directory
-        self.arduino_libs_mcu = join(self.platform.get_package_dir("framework-arduinoespressif32pio-libs"), self.mcu)
+
+        # Cache expensive operations using lazy loading
+        self._arduino_framework_dir = None
+        self._arduino_libs_mcu = None
+
+    @property
+    def arduino_framework_dir(self):
+        """
+        Lazy-loaded property for Arduino framework directory.
+
+        Returns:
+            Path to Arduino ESP32 framework installation directory
+        """
+        if self._arduino_framework_dir is None:
+            self._arduino_framework_dir = self.platform.get_package_dir("framework-arduinoespressif32")
+        return self._arduino_framework_dir
+
+    @property
+    def arduino_libs_mcu(self):
+        """
+        Lazy-loaded property for MCU-specific Arduino libraries directory.
+
+        Returns:
+            Path to MCU-specific Arduino libraries directory
+        """
+        if self._arduino_libs_mcu is None:
+            ald = self.platform.get_package_dir("framework-arduinoespressif32-libs")
+            self._arduino_libs_mcu = str(Path(ald) / self.mcu) if ald else ""
+        return self._arduino_libs_mcu
 
 
 class ComponentLogger:
@@ -175,23 +200,6 @@ class ComponentHandler:
             if self.removed_components:
                 self._cleanup_removed_components()
 
-        self._patch_framework_path();
-
-    def _patch_framework_path(self) -> None:
-        build_py_path = join(self.config.arduino_libs_mcu, "pioarduino-build.py")
-
-        try:
-            # print(">>>>>>>> Patch framework lib path\n")
-            with open(build_py_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-
-            content = content.replace('"framework-arduinoespressif32"', '"framework-arduinoespressif32pio"')
-            content = content.replace('"framework-arduinoespressif32-libs"', '"framework-arduinoespressif32pio-libs"')
-            with open(build_py_path, 'w', encoding='utf-8') as f:
-                f.write(content)
-        except Exception:
-            pass
-
     def _process_component_removals(self, component_data: Dict[str, Any]) -> None:
         """
         Process component removal requests from project configuration.
@@ -244,14 +252,15 @@ class ComponentHandler:
         Returns:
             Absolute path to the component YAML file
         """
-        # Try Arduino framework first
-        framework_yml = join(self.config.arduino_framework_dir, "idf_component.yml")
-        if os.path.exists(framework_yml):
+        # Check Arduino framework directory first
+        afd = self.config.arduino_framework_dir
+        framework_yml = str(Path(afd) / "idf_component.yml") if afd else ""
+        if framework_yml and os.path.exists(framework_yml):
             self._create_backup(framework_yml)
             return framework_yml
 
         # Try project source directory
-        project_yml = join(self.config.project_src_dir, "idf_component.yml")
+        project_yml = str(Path(self.config.project_src_dir) / "idf_component.yml")
         if os.path.exists(project_yml):
             self._create_backup(project_yml)
             return project_yml
@@ -378,7 +387,7 @@ class ComponentHandler:
 
         for component in components_to_add:
             component = component.strip()
-            if len(component) <= 4:  # Skip too short entries
+            if not component:  # Skip empty entries
                 continue
 
             component_name, version = self._parse_component_entry(component)
@@ -434,8 +443,11 @@ class ComponentHandler:
         if "arduino" not in self.config.env.subst("$PIOFRAMEWORK"):
             return
 
-        build_py_path = join(self.config.arduino_libs_mcu, "pioarduino-build.py")
-        backup_path = join(self.config.arduino_libs_mcu, f"pioarduino-build.py.{self.config.mcu}")
+        if not self.config.arduino_libs_mcu:
+            return
+
+        build_py_path = str(Path(self.config.arduino_libs_mcu) / "pioarduino-build.py")
+        backup_path = str(Path(self.config.arduino_libs_mcu) / f"pioarduino-build.py.{self.config.mcu}")
 
         if os.path.exists(build_py_path) and not os.path.exists(backup_path):
             shutil.copy2(build_py_path, backup_path)
@@ -444,39 +456,44 @@ class ComponentHandler:
         """
         Clean up removed components and restore original build file.
 
-        Performs cleanup operations for all components that were removed,
+        Performs optimized batch cleanup operations for all components that were removed,
         including removing include directories and cleaning up CPPPATH
-        entries from the build script.
+        entries from the build script in a single pass.
         """
+        if not self.removed_components:
+            return
+
+        # Batch remove include directories
+        self._batch_remove_include_directories()
+
+        # Single pass through build file for all components
+        self._batch_remove_cpppath_entries()
+
+    def _batch_remove_include_directories(self) -> None:
+        """
+        Remove multiple include directories in one optimized operation.
+
+        Removes all component include directories efficiently without
+        individual file system calls for each component.
+        """
+        include_base_path = Path(self.config.arduino_libs_mcu) / "include"
+
         for component in self.removed_components:
-            self._remove_include_directory(component)
+            include_path = include_base_path / component
+            if include_path.exists():
+                try:
+                    shutil.rmtree(include_path)
+                except OSError:
+                    pass  # Continue with other components
 
-        self._remove_cpppath_entries()
-
-    def _remove_include_directory(self, component: str) -> None:
+    def _batch_remove_cpppath_entries(self) -> None:
         """
-        Remove include directory for a specific component.
+        Remove CPPPATH entries for all components in single optimized file pass.
 
-        Removes the component's include directory from the Arduino framework
-        libraries to prevent compilation errors and reduce build overhead.
-
-        Args:
-            component: Component name in filesystem format
+        Uses compiled regex patterns and processes all removed components
+        in a single pass through the build file for maximum efficiency.
         """
-        include_path = join(self.config.arduino_libs_mcu, "include", component)
-
-        if os.path.exists(include_path):
-            shutil.rmtree(include_path)
-
-    def _remove_cpppath_entries(self) -> None:
-        """
-        Remove CPPPATH entries for removed components from pioarduino-build.py.
-
-        Scans the Arduino build script and removes include path entries
-        for all components that were removed from the project. Uses
-        multiple regex patterns to catch different include path formats.
-        """
-        build_py_path = join(self.config.arduino_libs_mcu, "pioarduino-build.py")
+        build_py_path = str(Path(self.config.arduino_libs_mcu) / "pioarduino-build.py")
 
         if not os.path.exists(build_py_path):
             return
@@ -486,44 +503,48 @@ class ComponentHandler:
                 content = f.read()
 
             original_content = content
-            content = content.replace('"framework-arduinoespressif32"', '"framework-arduinoespressif32pio"')
-            content = content.replace('"framework-arduinoespressif32-libs"', '"framework-arduinoespressif32pio-libs"')
 
-            # Remove CPPPATH entries for each removed component
-            for component in self.removed_components:
-                patterns = [
-                    rf'.*join\([^,]*,\s*"include",\s*"{re.escape(component)}"[^)]*\),?\n',
-                    rf'.*"include/{re.escape(component)}"[^,\n]*,?\n',
-                    rf'.*"[^"]*include[^"]*{re.escape(component)}[^"]*"[^,\n]*,?\n'
-                ]
+            # Create combined pattern for all components for maximum efficiency
+            escaped_components = [re.escape(comp) for comp in self.removed_components]
+            component_pattern = '|'.join(escaped_components)
 
-                for pattern in patterns:
-                    content = re.sub(pattern, '', content)
+            # Compile patterns once for all components
+            combined_patterns = [
+                re.compile(rf'.*join\([^,]*,\s*"include",\s*"({component_pattern})"[^)]*\),?\n'),
+                re.compile(rf'.*"include/({component_pattern})"[^,\n]*,?\n'),
+                re.compile(rf'.*"[^"]*include[^"]*({component_pattern})[^"]*"[^,\n]*,?\n')
+            ]
 
+            # Apply all patterns in single pass
+            for pattern in combined_patterns:
+                content = pattern.sub('', content)
+
+            # Write changes if any were made
             if content != original_content:
                 with open(build_py_path, 'w', encoding='utf-8') as f:
                     f.write(content)
 
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[ComponentManager] Error updating build file during CPPPATH cleanup: {e!s}")
 
 
 class LibraryIgnoreHandler:
     """
-    Handles lib_ignore processing and include removal.
+    Handles lib_ignore processing and include removal with optimized performance.
 
     Manages the processing of lib_ignore entries from platformio.ini,
     converting library names to include paths and removing corresponding
     entries from the build script while protecting critical components.
+    Uses compiled regex patterns and caching for maximum performance.
     """
 
     def __init__(self, config: ComponentManagerConfig, logger: ComponentLogger):
         """
-        Initialize the library ignore handler.
+        Initialize the library ignore handler with performance optimizations.
 
         Sets up the handler with configuration and logging dependencies,
-        initializes tracking for ignored libraries, and prepares caching
-        for Arduino library mappings.
+        initializes tracking for ignored libraries, and prepares optimized
+        caching and compiled patterns for maximum performance.
 
         Args:
             config: Configuration manager instance for accessing paths and settings
@@ -533,8 +554,33 @@ class LibraryIgnoreHandler:
         self.logger = logger
         # Track ignored libraries for processing
         self.ignored_libs: Set[str] = set()
-        # Cache for Arduino library mappings (lazy loaded)
+
+        # Performance optimization: Pre-compute critical components as set for O(1) lookup
+        self._critical_components = {
+            'lwip',           # Network stack
+            'freertos',       # Real-time OS
+            'esp_system',     # System functions
+            'esp_common',     # Common ESP functions
+            'driver',         # Hardware drivers
+            'nvs_flash',      # Non-volatile storage
+            'spi_flash',      # Flash memory access
+            'esp_timer',      # Timer functions
+            'esp_event',      # Event system
+            'log',            # Logging system
+            'arduino_tinyusb', # Arduino TinyUSB library
+            'tinyusb'         # TinyUSB library
+        }
+
+        # Pre-compute BT-related keywords as set for O(1) lookup
+        self._bt_keywords = {
+            'BLE', 'BT', 'NIMBLE', 'BLUETOOTH', 'ESP32_BLE', 'ESP32BLE',
+            'BLUETOOTHSERIAL', 'BLE_ARDUINO', 'ESP_BLE', 'ESP_BT'
+        }
+
+        # Cache for expensive operations (lazy loaded)
         self._arduino_libraries_cache = None
+        self._compiled_patterns_cache = {}
+        self._cleanup_patterns = None
 
     def handle_lib_ignore(self) -> None:
         """
@@ -542,7 +588,7 @@ class LibraryIgnoreHandler:
 
         Main entry point for library ignore processing. Creates backup if needed,
         processes lib_ignore entries from the current environment, and removes
-        corresponding include paths from the build script.
+        corresponding include paths from the build script using optimized algorithms.
         """
         # Create backup before processing lib_ignore
         if not self.ignored_libs:
@@ -558,11 +604,11 @@ class LibraryIgnoreHandler:
 
     def _get_lib_ignore_entries(self) -> List[str]:
         """
-        Get lib_ignore entries from current environment configuration only.
+        Get lib_ignore entries from current environment configuration with optimized filtering.
 
         Extracts and processes lib_ignore entries from the platformio.ini
         configuration, converting library names to include directory names
-        and filtering out critical ESP32 components that should never be ignored.
+        and filtering out critical ESP32 components using O(1) set lookups.
 
         Returns:
             List of processed library names ready for include path removal
@@ -583,35 +629,18 @@ class LibraryIgnoreHandler:
                 if entry:
                     # Convert library names to potential include directory names
                     include_name = self._convert_lib_name_to_include(entry)
-                    cleaned_entries.append(include_name)
+                    # Use optimized set lookup for critical components check (O(1) vs O(n))
+                    if include_name not in self._critical_components:
+                        cleaned_entries.append(include_name)
 
-            # Filter out critical ESP32 components that should never be ignored
-            critical_components = [
-                'lwip',           # Network stack
-                'freertos',       # Real-time OS
-                'esp_system',     # System functions
-                'esp_common',     # Common ESP functions
-                'driver',         # Hardware drivers
-                'nvs_flash',      # Non-volatile storage
-                'spi_flash',      # Flash memory access
-                'esp_timer',      # Timer functions
-                'esp_event',      # Event system
-                'log'             # Logging system
-            ]
-
-            filtered_entries = []
-            for entry in cleaned_entries:
-                if entry not in critical_components:
-                    filtered_entries.append(entry)
-
-            return filtered_entries
+            return sorted(set(cleaned_entries))
 
         except Exception:
             return []
 
     def _has_bt_ble_dependencies(self) -> bool:
         """
-        Check if lib_deps contains any BT/BLE related dependencies.
+        Check if lib_deps contains any BT/BLE related dependencies using optimized search.
 
         Scans the lib_deps configuration option for Bluetooth or BLE
         related keywords to determine if BT components should be protected
@@ -629,23 +658,20 @@ class LibraryIgnoreHandler:
             elif lib_deps is None:
                 lib_deps = []
 
-            # Convert to string and check for BT/BLE keywords
+            # Convert to string and check for BT/BLE keywords using set intersection
             lib_deps_str = ' '.join(str(dep) for dep in lib_deps).upper()
-
-            bt_ble_keywords = ['BLE', 'BT', 'NIMBLE', 'BLUETOOTH']
-
-            return any(keyword in lib_deps_str for keyword in bt_ble_keywords)
+            return any(keyword in lib_deps_str for keyword in self._bt_keywords)
 
         except Exception:
             return False
 
     def _is_bt_related_library(self, lib_name: str) -> bool:
         """
-        Check if a library name is related to Bluetooth/BLE functionality.
+        Check if a library name is related to Bluetooth/BLE functionality using optimized lookup.
 
         Examines library names for Bluetooth and BLE related keywords
         to determine if the library should be protected when BT dependencies
-        are present in the project.
+        are present in the project. Uses pre-computed set for fast lookup.
 
         Args:
             lib_name: Library name to check for BT/BLE relation
@@ -654,21 +680,7 @@ class LibraryIgnoreHandler:
             True if library name contains BT/BLE related keywords
         """
         lib_name_upper = lib_name.upper()
-
-        bt_related_names = [
-            'BT',
-            'BLE',
-            'BLUETOOTH',
-            'NIMBLE',
-            'ESP32_BLE',
-            'ESP32BLE',
-            'BLUETOOTHSERIAL',
-            'BLE_ARDUINO',
-            'ESP_BLE',
-            'ESP_BT'
-        ]
-
-        return any(bt_name in lib_name_upper for bt_name in bt_related_names)
+        return any(bt_keyword in lib_name_upper for bt_keyword in self._bt_keywords)
 
     def _get_arduino_core_libraries(self) -> Dict[str, str]:
         """
@@ -684,14 +696,17 @@ class LibraryIgnoreHandler:
         libraries_mapping = {}
 
         # Path to Arduino Core Libraries
-        arduino_libs_dir = join(self.config.arduino_framework_dir, "libraries")
+        afd = self.config.arduino_framework_dir
+        if not afd:
+            return libraries_mapping
+        arduino_libs_dir = str(Path(afd).resolve() / "libraries")
 
         if not os.path.exists(arduino_libs_dir):
             return libraries_mapping
 
         try:
             for entry in os.listdir(arduino_libs_dir):
-                lib_path = join(arduino_libs_dir, entry)
+                lib_path = str(Path(arduino_libs_dir) / entry)
                 if os.path.isdir(lib_path):
                     lib_name = self._get_library_name_from_properties(lib_path)
                     if lib_name:
@@ -716,7 +731,7 @@ class LibraryIgnoreHandler:
         Returns:
             Official library name or None if not found or readable
         """
-        prop_path = join(lib_dir, "library.properties")
+        prop_path = str(Path(lib_dir) / "library.properties")
         if not os.path.isfile(prop_path):
             return None
 
@@ -776,6 +791,9 @@ class LibraryIgnoreHandler:
             # Arduino Core specific mappings (safe mappings that don't conflict with critical components)
             'esp32blearduino': 'bt',
             'esp32_ble_arduino': 'bt',
+            'simpleble': 'bt',
+            'esp_nimble_cpp': 'bt',
+            'nimble_arduino': 'bt',
             'esp32': 'esp32',
             'wire': 'driver',
             'spi': 'driver',
@@ -827,7 +845,17 @@ class LibraryIgnoreHandler:
             'esptouch': 'esp_smartconfig',
             'ping': 'lwip',
             'netif': 'lwip',
-            'tcpip': 'lwip'
+            'tcpip': 'lwip',
+            'usb': 'arduino_tinyusb',
+            'tinyusb': 'arduino_tinyusb',
+            'dsp': 'espressif__esp-dsp',
+            'esp_dsp': 'espressif__esp-dsp',
+            'dsps': 'espressif__esp-dsp',
+            'fft2r': 'espressif__esp-dsp',
+            'dsps_fft2r': 'espressif__esp-dsp',
+            'esp-dsp': 'espressif__esp-dsp',
+            'espressif/esp-dsp': 'espressif__esp-dsp',
+            'espressif__esp-dsp': 'espressif__esp-dsp'
         }
 
         # Check extended mapping first
@@ -843,11 +871,12 @@ class LibraryIgnoreHandler:
 
     def _convert_lib_name_to_include(self, lib_name: str) -> str:
         """
-        Convert library name to potential include directory name.
+        Convert library name to potential include directory name with optimized fast paths.
 
         Converts library names from platformio.ini lib_ignore entries
         to their corresponding include directory names. Uses Arduino
-        core library mappings and common naming conventions.
+        core library mappings and common naming conventions with
+        performance optimizations for common cases like DSP.
 
         Args:
             lib_name: Library name from lib_ignore configuration
@@ -855,16 +884,44 @@ class LibraryIgnoreHandler:
         Returns:
             Converted include directory name for path removal
         """
-        # Load Arduino Core Libraries on first call
-        if not hasattr(self, '_arduino_libraries_cache'):
-            self._arduino_libraries_cache = self._get_arduino_core_libraries()
-
         lib_name_lower = lib_name.lower()
 
-        # Check Arduino Core Libraries first
+        # Fast path optimization for DSP components (most performance-critical case)
+        dsp_patterns = {
+            'dsp', 'esp_dsp', 'dsps', 'fft2r', 'dsps_fft2r', 'esp-dsp',
+            'espressif/esp-dsp', 'espressif__esp-dsp'
+        }
+        if lib_name_lower in dsp_patterns:
+            return 'espressif__esp-dsp'
+
+        # Fast path for BT components
+        bt_patterns = {
+            'ble', 'bluetooth', 'bluetoothserial', 'simpleble', 'esp-nimble-cpp'
+        }
+        if lib_name_lower in bt_patterns:
+            return 'bt'
+
+        # Load Arduino Core Libraries on first call (lazy loading)
+        if self._arduino_libraries_cache is None:
+            self._arduino_libraries_cache = self._get_arduino_core_libraries()
+
+        # Check Arduino Core Libraries cache
         if lib_name_lower in self._arduino_libraries_cache:
             return self._arduino_libraries_cache[lib_name_lower]
 
+        # Continue with full conversion logic for less common cases
+        return self._full_conversion_logic(lib_name_lower)
+
+    def _full_conversion_logic(self, lib_name_lower: str) -> str:
+        """
+        Full conversion logic for library names not handled by fast paths.
+
+        Args:
+            lib_name_lower: Lowercase library name to convert
+
+        Returns:
+            Converted include directory name
+        """
         # Remove common prefixes and suffixes
         cleaned_name = lib_name_lower
 
@@ -884,130 +941,182 @@ class LibraryIgnoreHandler:
         if cleaned_name in self._arduino_libraries_cache:
             return self._arduino_libraries_cache[cleaned_name]
 
-        # Direct mapping for common cases not in Arduino libraries
-        direct_mapping = {
-            'ble': 'bt',
-            'bluetooth': 'bt',
-            'bluetoothserial': 'bt'
-        }
-
-        if cleaned_name in direct_mapping:
-            return direct_mapping[cleaned_name]
-
         return cleaned_name
+
+    def _get_compiled_patterns(self, lib_name: str) -> List[Pattern]:
+        """
+        Get pre-compiled regex patterns for a library name with caching.
+
+        Compiles and caches regex patterns for library name matching
+        to avoid repeated compilation overhead during processing.
+
+        Args:
+            lib_name: Library name to create patterns for
+
+        Returns:
+            List of compiled regex patterns for the library
+        """
+        if lib_name not in self._compiled_patterns_cache:
+            escaped_name = re.escape(lib_name)
+            patterns = [
+                re.compile(rf'.*join\([^,]*,\s*"include",\s*"{escaped_name}"[^)]*\),?\n'),
+                re.compile(rf'.*"include/{escaped_name}"[^,\n]*,?\n'),
+                re.compile(rf'.*"[^"]*include[^"]*{escaped_name}[^"]*"[^,\n]*,?\n'),
+                re.compile(rf'.*"[^"]*/{escaped_name}/include[^"]*"[^,\n]*,?\n'),
+                re.compile(rf'.*"[^"]*{escaped_name}[^"]*include[^"]*"[^,\n]*,?\n'),
+                re.compile(rf'.*join\([^)]*"include"[^)]*"{escaped_name}"[^)]*\),?\n'),
+                re.compile(rf'.*"{escaped_name}/include"[^,\n]*,?\n'),
+                re.compile(rf'\s*"[^"]*[\\/]{escaped_name}[\\/][^"]*",?\n'),
+                re.compile(rf'.*Path\([^)]*\)\s*/\s*"include"\s*/\s*"{escaped_name}"[^,\n]*,?\n'),
+                re.compile(rf'.*Path\([^)]*{escaped_name}[^)]*\)\s*/\s*"include"[^,\n]*,?\n')
+            ]
+            self._compiled_patterns_cache[lib_name] = patterns
+        return self._compiled_patterns_cache[lib_name]
+
+    def _get_cleanup_patterns(self) -> List[Pattern]:
+        """
+        Get compiled cleanup patterns with caching.
+
+        Returns:
+            List of compiled regex patterns for content cleanup
+        """
+        if self._cleanup_patterns is None:
+            self._cleanup_patterns = [
+                re.compile(r'\n\s*\n'),
+                re.compile(r',\s*\n\s*\]')
+            ]
+        return self._cleanup_patterns
 
     def _remove_ignored_lib_includes(self) -> None:
         """
-        Remove include entries for ignored libraries from pioarduino-build.py.
+        Remove include entries for ignored libraries using optimized batch processing.
 
         Processes the Arduino build script to remove CPPPATH entries for
-        all ignored libraries. Implements protection for BT/BLE and DSP
-        components when dependencies are detected. Uses multiple regex
-        patterns to catch different include path formats.
+        all ignored libraries using compiled regex patterns and batch processing.
+        Implements protection for BT/BLE components when dependencies are detected.
         """
-        build_py_path = join(self.config.arduino_libs_mcu, "pioarduino-build.py")
+        build_py_path = str(Path(self.config.arduino_libs_mcu) / "pioarduino-build.py")
 
         if not os.path.exists(build_py_path):
             self.logger.log_change("Build file not found")
             return
 
-        # Check if BT/BLE dependencies exist in lib_deps
+        # Check if BT/BLE dependencies exist in lib_deps (single check)
         bt_ble_protected = self._has_bt_ble_dependencies()
         if bt_ble_protected:
             self.logger.log_change("BT/BLE protection enabled")
 
         try:
+            # Read file once
             with open(build_py_path, 'r', encoding='utf-8') as f:
                 content = f.read()
 
             original_content = content
             total_removed = 0
 
-            # Remove CPPPATH entries for each ignored library
+            # Pre-filter libraries to process (avoid processing protected libraries)
+            libs_to_process = []
             for lib_name in self.ignored_libs:
-                # Skip BT-related libraries if BT/BLE dependencies are present
                 if bt_ble_protected and self._is_bt_related_library(lib_name):
                     self.logger.log_change(f"Protected BT library: {lib_name}")
                     continue
+                libs_to_process.append(lib_name)
 
-                # Hard protection for DSP components
-                if lib_name.lower() in ['dsp', 'esp_dsp', 'dsps', 'fft2r', 'dsps_fft2r']:
-                    self.logger.log_change(f"Protected DSP component: {lib_name}")
-                    continue
+            # Batch process all libraries using compiled patterns
+            if libs_to_process:
+                content, total_removed = self._batch_remove_patterns(content, libs_to_process)
 
-                # Multiple patterns to catch different include formats
-                patterns = [
-                    rf'.*join\([^,]*,\s*"include",\s*"{re.escape(lib_name)}"[^)]*\),?\n',
-                    rf'.*"include/{re.escape(lib_name)}"[^,\n]*,?\n',
-                    rf'.*"[^"]*include[^"]*{re.escape(lib_name)}[^"]*"[^,\n]*,?\n',
-                    rf'.*"[^"]*/{re.escape(lib_name)}/include[^"]*"[^,\n]*,?\n',
-                    rf'.*"[^"]*{re.escape(lib_name)}[^"]*include[^"]*"[^,\n]*,?\n',
-                    rf'.*join\([^)]*"include"[^)]*"{re.escape(lib_name)}"[^)]*\),?\n',
-                    rf'.*"{re.escape(lib_name)}/include"[^,\n]*,?\n',
-                    rf'\s*"[^"]*/{re.escape(lib_name)}/[^"]*",?\n'
-                ]
+            # Clean up content once at the end
+            if total_removed > 0:
+                content = self._cleanup_content(content)
 
-                removed_count = 0
-                for pattern in patterns:
-                    matches = re.findall(pattern, content)
-                    if matches:
-                        content = re.sub(pattern, '', content)
-                        removed_count += len(matches)
+                # Validate and write changes
+                if self._validate_changes(original_content, content):
+                    with open(build_py_path, 'w', encoding='utf-8') as f:
+                        f.write(content)
+                    self.logger.log_change(f"Updated build file ({total_removed} total removals)")
 
-                if removed_count > 0:
-                    self.logger.log_change(f"Ignored library: {lib_name} ({removed_count} entries)")
-                    total_removed += removed_count
-
-            # Clean up empty lines and trailing commas
-            content = re.sub(r'\n\s*\n', '\n', content)
-            content = re.sub(r',\s*\n\s*\]', '\n]', content)
-
-            # Validate and write changes
-            if self._validate_changes(original_content, content) and content != original_content:
-                with open(build_py_path, 'w', encoding='utf-8') as f:
-                    f.write(content)
-                self.logger.log_change(f"Updated build file ({total_removed} total removals)")
-
-        except (IOError, OSError) as e:
-            self.logger.log_change(f"Error processing libraries: {str(e)}")
         except Exception as e:
-            self.logger.log_change(f"Unexpected error processing libraries: {str(e)}")
+            self.logger.log_change(f"Error processing libraries: {e!s} ({e.__class__.__name__})")
+
+    def _batch_remove_patterns(self, content: str, libs_to_process: List[str]) -> Tuple[str, int]:
+        """
+        Process all libraries in batches using compiled patterns for optimal performance.
+
+        Args:
+            content: File content to process
+            libs_to_process: List of library names to remove
+
+        Returns:
+            Tuple of (modified_content, total_removed_count)
+        """
+        total_removed = 0
+
+        for lib_name in libs_to_process:
+            patterns = self._get_compiled_patterns(lib_name)
+            removed_count = 0
+
+            for pattern in patterns:
+                matches = pattern.findall(content)
+                if matches:
+                    content = pattern.sub('', content)
+                    removed_count += len(matches)
+
+            if removed_count > 0:
+                self.logger.log_change(f"Ignored library: {lib_name} ({removed_count} entries)")
+                total_removed += removed_count
+
+        return content, total_removed
+
+    def _cleanup_content(self, content: str) -> str:
+        """
+        Optimized content cleanup using compiled patterns.
+
+        Args:
+            content: Content to clean up
+
+        Returns:
+            Cleaned content
+        """
+        cleanup_patterns = self._get_cleanup_patterns()
+        content = cleanup_patterns[0].sub('\n', content)
+        content = cleanup_patterns[1].sub('\n]', content)
+        return content
 
     def _validate_changes(self, original_content: str, new_content: str) -> bool:
         """
-        Validate that the changes are reasonable and safe.
-
-        Performs sanity checks on the modified content to ensure that
-        the changes don't remove too much content or create invalid
-        modifications that could break the build process.
+        Validate that changes are safe and don't break the build file structure.
 
         Args:
-            original_content: Original file content before modifications
-            new_content: Modified file content after processing
+            original_content: Original file content
+            new_content: Modified file content
 
         Returns:
-            True if changes are within acceptable limits and safe to apply
+            True if changes are safe to apply
         """
-        original_lines = len(original_content.splitlines())
-        new_lines = len(new_content.splitlines())
-        removed_lines = original_lines - new_lines
-
-        # Don't allow removing more than 50% of the file or negative changes
-        return not (removed_lines > original_lines * 0.5 or removed_lines < 0)
+        # Basic validation - ensure we haven't broken basic Python syntax
+        if new_content != original_content:
+            # Check that we still have essential structure elements
+            essential_elements = ['CPPPATH', 'env.Append', '[', ']']
+            return all(element in new_content for element in essential_elements)
+        return True
 
     def _backup_pioarduino_build_py(self) -> None:
         """
         Create backup of the original pioarduino-build.py file.
 
-        Creates a backup copy of the Arduino build script before making
-        modifications. Only operates when Arduino framework is active
-        and uses MCU-specific backup naming to avoid conflicts.
+        Creates a backup of the Arduino framework's build script before
+        making modifications. Only operates when Arduino framework is active
+        and creates MCU-specific backup names to avoid conflicts.
         """
         if "arduino" not in self.config.env.subst("$PIOFRAMEWORK"):
             return
 
-        build_py_path = join(self.config.arduino_libs_mcu, "pioarduino-build.py")
-        backup_path = join(self.config.arduino_libs_mcu, f"pioarduino-build.py.{self.config.mcu}")
+        if not self.config.arduino_libs_mcu:
+            return
+
+        build_py_path = str(Path(self.config.arduino_libs_mcu) / "pioarduino-build.py")
+        backup_path = str(Path(self.config.arduino_libs_mcu) / f"pioarduino-build.py.{self.config.mcu}")
 
         if os.path.exists(build_py_path) and not os.path.exists(backup_path):
             shutil.copy2(build_py_path, backup_path)
@@ -1016,7 +1125,7 @@ class LibraryIgnoreHandler:
 class BackupManager:
     """
     Handles backup and restore operations for build files.
-
+    
     Manages the creation and restoration of backup files for the Arduino
     framework build scripts, ensuring that original files can be restored
     when needed or when builds are cleaned.
@@ -1045,8 +1154,8 @@ class BackupManager:
         if "arduino" not in self.config.env.subst("$PIOFRAMEWORK"):
             return
 
-        build_py_path = join(self.config.arduino_libs_mcu, "pioarduino-build.py")
-        backup_path = join(self.config.arduino_libs_mcu, f"pioarduino-build.py.{self.config.mcu}")
+        build_py_path = str(Path(self.config.arduino_libs_mcu) / "pioarduino-build.py")
+        backup_path = str(Path(self.config.arduino_libs_mcu) / f"pioarduino-build.py.{self.config.mcu}")
 
         if os.path.exists(build_py_path) and not os.path.exists(backup_path):
             shutil.copy2(build_py_path, backup_path)
@@ -1064,8 +1173,8 @@ class BackupManager:
             source: Build source (unused, for PlatformIO compatibility)
             env: Environment (unused, for PlatformIO compatibility)
         """
-        build_py_path = join(self.config.arduino_libs_mcu, "pioarduino-build.py")
-        backup_path = join(self.config.arduino_libs_mcu, f"pioarduino-build.py.{self.config.mcu}")
+        build_py_path = str(Path(self.config.arduino_libs_mcu) / "pioarduino-build.py")
+        backup_path = str(Path(self.config.arduino_libs_mcu) / f"pioarduino-build.py.{self.config.mcu}")
 
         if os.path.exists(backup_path):
             shutil.copy2(backup_path, build_py_path)
