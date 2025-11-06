@@ -193,7 +193,7 @@ def safe_copy_directory(src: Union[str, Path], dst: Union[str, Path]) -> bool:
     return True
 
 
-class Espressif32Platform(PlatformBase):
+class Espressif32pioPlatform(PlatformBase):
     """ESP32 platform implementation for PlatformIO with optimized toolchain management."""
 
     def __init__(self, *args, **kwargs):
@@ -215,35 +215,35 @@ class Espressif32Platform(PlatformBase):
         """
         Check if tool-esp_install is installed in the correct version.
         Install the correct version only if version differs.
-        
+
         Returns:
             bool: True if correct version is available, False on error
         """
-        
+
         # Get required version from platform.json
         required_version = self.packages.get(tl_install_name, {}).get("version")
         if not required_version:
             logger.debug(f"No version check required for {tl_install_name}")
             return True
-        
+
         # Check current installation status
         tl_install_path = self.packages_dir / tl_install_name
         package_json_path = tl_install_path / "package.json"
-        
+
         if not package_json_path.exists():
             logger.info(f"{tl_install_name} not installed, installing version {required_version}")
             return self._install_tl_install(required_version)
-        
+
         # Read installed version
         try:
             with open(package_json_path, 'r', encoding='utf-8') as f:
                 package_data = json.load(f)
-            
+
             installed_version = package_data.get("version")
             if not installed_version:
                 logger.warning(f"Installed version for {tl_install_name} unknown, installing {required_version}")
                 return self._install_tl_install(required_version)
-            
+
             # Compare versions to avoid unnecessary reinstallation
             if self._compare_tl_install_versions(installed_version, required_version):
                 logger.debug(f"{tl_install_name} version {installed_version} is already correctly installed")
@@ -256,7 +256,7 @@ class Espressif32Platform(PlatformBase):
                     f"installed={installed_version}, required={required_version}, installing correct version"
                 )
                 return self._install_tl_install(required_version)
-            
+
         except (json.JSONDecodeError, FileNotFoundError) as e:
             logger.error(f"Error reading package data for {tl_install_name}: {e}")
             return self._install_tl_install(required_version)
@@ -264,29 +264,29 @@ class Espressif32Platform(PlatformBase):
     def _compare_tl_install_versions(self, installed: str, required: str) -> bool:
         """
         Compare installed and required version of tool-esp_install.
-        
+
         Args:
             installed: Currently installed version string
             required: Required version string from platform.json
-            
+
         Returns:
             bool: True if versions match, False otherwise
         """
         # For URL-based versions: Extract version string from URL
         installed_clean = self._extract_version_from_url(installed)
         required_clean = self._extract_version_from_url(required)
-        
+
         logger.debug(f"Version comparison: installed='{installed_clean}' vs required='{required_clean}'")
-        
+
         return installed_clean == required_clean
 
     def _extract_version_from_url(self, version_string: str) -> str:
         """
         Extract version information from URL or return version directly.
-        
+
         Args:
             version_string: Version string or URL containing version
-            
+
         Returns:
             str: Extracted version string
         """
@@ -309,7 +309,7 @@ class Espressif32Platform(PlatformBase):
 
         Args:
             version: Version string or URL to install
-   
+
         Returns:
             bool: True if installation successful, False otherwise
         """
@@ -337,7 +337,7 @@ class Espressif32Platform(PlatformBase):
             if (tl_install_path / "package.json").exists():
                 logger.info(f"{tl_install_name} successfully installed and verified")
                 self.packages[tl_install_name]["optional"] = True
-            
+
                 # Maintain backwards compatibility with legacy tl-install references
                 if old_tl_install_exists:
                     # Copy tool-esp_install content to legacy tl-install location
@@ -349,7 +349,7 @@ class Espressif32Platform(PlatformBase):
             else:
                 logger.error(f"{tl_install_name} installation failed - package.json not found")
                 return False
-        
+
         except Exception as e:
             logger.error(f"Error installing {tl_install_name}: {e}")
             return False
@@ -358,27 +358,27 @@ class Espressif32Platform(PlatformBase):
         """
         Clean up versioned tool directories containing '@' or version suffixes.
         This function should be called during every tool version check.
-        
+
         Args:
             tool_name: Name of the tool to clean up
         """
         packages_path = Path(self.packages_dir)
         if not packages_path.exists() or not packages_path.is_dir():
             return
-            
+
         try:
             # Remove directories with '@' in their name (e.g., tool-name@version, tool-name@src)
             safe_remove_directory_pattern(packages_path, f"{tool_name}@*")
-            
+
             # Remove directories with version suffixes (e.g., tool-name.12345)
             safe_remove_directory_pattern(packages_path, f"{tool_name}.*")
-            
+
             # Also check for any directory that starts with tool_name and contains '@'
             for item in packages_path.iterdir():
                 if item.name.startswith(tool_name) and '@' in item.name and item.is_dir():
                     safe_remove_directory(item)
                     logger.debug(f"Removed versioned directory: {item}")
-                        
+
         except OSError:
             logger.exception(f"Error cleaning up versioned directories for {tool_name}")
 
@@ -386,7 +386,7 @@ class Espressif32Platform(PlatformBase):
         """Get centralized path calculation for tools with caching."""
         if tool_name not in self._tools_cache:
             tool_path = Path(self.packages_dir) / tool_name
-            
+
             self._tools_cache[tool_name] = {
                 'tool_path': str(tool_path),
                 'package_path': str(tool_path / "package.json"),
@@ -414,7 +414,7 @@ class Espressif32Platform(PlatformBase):
         """
         # Use penv Python if available, fallback to system Python
         python_executable = penv_python or python_exe
-        
+
         cmd = [
             python_executable,
             idf_tools_path,
@@ -451,7 +451,7 @@ class Espressif32Platform(PlatformBase):
         """Check if the installed tool version matches the required version."""
         # Clean up versioned directories before version checks to prevent conflicts
         self._cleanup_versioned_tool_directories(tool_name)
-        
+
         paths = self._get_tool_paths(tool_name)
 
         try:
@@ -487,6 +487,7 @@ class Espressif32Platform(PlatformBase):
         self.packages[tool_name]["optional"] = False
         paths = self._get_tool_paths(tool_name)
         status = self._check_tool_status(tool_name)
+        # print(f">>>>> install_tool {tool_name} path {paths} status {status}")
 
         # Use centrally configured Python executable if available
         penv_python = getattr(self, '_penv_python', None)
@@ -546,8 +547,8 @@ class Espressif32Platform(PlatformBase):
         if "arduino" not in frameworks:
             return
 
-        self.packages["framework-arduinoespressif32"]["optional"] = False
-        self.packages["framework-arduinoespressif32-libs"]["optional"] = False
+        self.packages["framework-arduinoespressif32pio"]["optional"] = False
+        self.packages["framework-arduinoespressif32pio-libs"]["optional"] = False
 
 
     def _configure_espidf_framework(
@@ -616,7 +617,7 @@ class Espressif32Platform(PlatformBase):
 
     def _configure_installer(self) -> None:
         """Configure the ESP-IDF tools installer with proper version checking."""
-        
+
         # Check version - installs only when needed
         if not self._check_tl_install_version():
             logger.error("Error during tool-esp_install version check / installation")
@@ -626,10 +627,10 @@ class Espressif32Platform(PlatformBase):
         old_tl_piopm_path = Path(self.packages_dir) / "tl-install" / ".piopm"
         if old_tl_piopm_path.exists():
             safe_remove_file(old_tl_piopm_path)
-        
+
         # Check if idf_tools.py is available
         installer_path = Path(self.packages_dir) / tl_install_name / "tools" / "idf_tools.py"
-        
+
         if installer_path.exists():
             logger.debug(f"{tl_install_name} is available and ready")
             self.packages[tl_install_name]["optional"] = True
@@ -638,6 +639,7 @@ class Espressif32Platform(PlatformBase):
 
     def _install_esptool_package(self) -> None:
         """Install esptool package required for all builds."""
+        # print(">>>>> call _install_esptool_package")
         self.install_tool("tool-esptoolpy")
 
     def _install_common_idf_packages(self) -> None:
@@ -755,18 +757,18 @@ class Espressif32Platform(PlatformBase):
             # FIRST: Install required packages
             self._configure_installer()
             self._install_esptool_package()
-            
+
             # Complete Python virtual environment setup
             config = ProjectConfig.get_instance()
             core_dir = config.get("platformio", "core_dir")
-            
+
             # Setup penv using minimal function (no SCons dependencies, esptool from tl-install)
             penv_python, esptool_path = setup_penv_minimal(self, core_dir, install_esptool=True)
-            
+
             # Store both for later use
             self._penv_python = penv_python
             self._esptool_path = esptool_path
-            
+
             # Configuration steps (now with penv available)
             self._configure_arduino_framework(frameworks)
             self._configure_espidf_framework(frameworks, variables, board_config, mcu)

@@ -12,7 +12,9 @@ import os
 import shutil
 import re
 import yaml
+import sys
 from pathlib import Path
+from os.path import join
 from typing import Set, Optional, Dict, Any, List, Tuple, Pattern
 from yaml import SafeLoader
 
@@ -61,7 +63,7 @@ class ComponentManagerConfig:
             Path to Arduino ESP32 framework installation directory
         """
         if self._arduino_framework_dir is None:
-            self._arduino_framework_dir = self.platform.get_package_dir("framework-arduinoespressif32")
+            self._arduino_framework_dir = self.platform.get_package_dir("framework-arduinoespressif32pio")
         return self._arduino_framework_dir
 
     @property
@@ -73,7 +75,7 @@ class ComponentManagerConfig:
             Path to MCU-specific Arduino libraries directory
         """
         if self._arduino_libs_mcu is None:
-            ald = self.platform.get_package_dir("framework-arduinoespressif32-libs")
+            ald = self.platform.get_package_dir("framework-arduinoespressif32pio-libs")
             self._arduino_libs_mcu = str(Path(ald) / self.mcu) if ald else ""
         return self._arduino_libs_mcu
 
@@ -199,6 +201,27 @@ class ComponentHandler:
             # Clean up removed components
             if self.removed_components:
                 self._cleanup_removed_components()
+
+        self._patch_framework_path(join(self.config.arduino_framework_dir, "tools"))
+        self._patch_framework_path(self.config.arduino_libs_mcu)
+
+    def _patch_framework_path(self, folder_path) -> None:
+        build_py_path = join(folder_path, "pioarduino-build.py")
+
+        try:
+            print(f">>>>> Patch framework lib path {build_py_path}")
+            print(sys.executable)
+            with open(build_py_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+
+            content = content.replace('"framework-arduinoespressif32"', '"framework-arduinoespressif32pio"')
+            content = content.replace('"framework-arduinoespressif32-libs"', '"framework-arduinoespressif32pio-libs"')
+            with open(build_py_path, 'w', encoding='utf-8') as f:
+                f.write(content)
+            print(">>>>> Done")
+        except Exception as e:
+            print(f">>>>> Patch failed {build_py_path}: {e}")
+            pass
 
     def _process_component_removals(self, component_data: Dict[str, Any]) -> None:
         """
@@ -503,6 +526,9 @@ class ComponentHandler:
                 content = f.read()
 
             original_content = content
+
+            content = content.replace('"framework-arduinoespressif32"', '"framework-arduinoespressif32pio"')
+            content = content.replace('"framework-arduinoespressif32-libs"', '"framework-arduinoespressif32pio-libs"')
 
             # Create combined pattern for all components for maximum efficiency
             escaped_components = [re.escape(comp) for comp in self.removed_components]
@@ -1125,7 +1151,7 @@ class LibraryIgnoreHandler:
 class BackupManager:
     """
     Handles backup and restore operations for build files.
-    
+
     Manages the creation and restoration of backup files for the Arduino
     framework build scripts, ensuring that original files can be restored
     when needed or when builds are cleaned.

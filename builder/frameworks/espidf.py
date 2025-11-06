@@ -152,7 +152,7 @@ def create_silent_action(action_func):
     return silent_action
 
 if "arduino" in env.subst("$PIOFRAMEWORK"):
-    _arduino_pkg_dir = platform.get_package_dir("framework-arduinoespressif32")
+    _arduino_pkg_dir = platform.get_package_dir("framework-arduinoespressif32pio")
     if not _arduino_pkg_dir or not os.path.isdir(_arduino_pkg_dir):
         sys.stderr.write(f"Error: Missing Arduino framework directory '{_arduino_pkg_dir}'\n")
         env.Exit(1)
@@ -170,9 +170,9 @@ if "arduino" in env.subst("$PIOFRAMEWORK"):
         sys.stderr.write(f"Error: Arduino framework directory not found: {ARDUINO_FRAMEWORK_DIR}\n")
         env.Exit(1)
 
-    _arduino_lib_dir = platform.get_package_dir("framework-arduinoespressif32-libs")
+    _arduino_lib_dir = platform.get_package_dir("framework-arduinoespressif32pio-libs")
     if not _arduino_lib_dir:
-        sys.stderr.write("Error: Missing framework-arduinoespressif32-libs package\n")
+        sys.stderr.write("Error: Missing framework-arduinoespressif32pio-libs package\n")
         env.Exit(1)
     arduino_lib_dir = Path(_arduino_lib_dir)
     ARDUINO_FRMWRK_LIB_DIR_PATH = arduino_lib_dir.resolve()
@@ -222,7 +222,7 @@ def HandleArduinoIDFsettings(env):
     """
     Handles Arduino IDF settings configuration with custom sdkconfig support.
     """
-    
+
     def get_MD5_hash(phrase):
         """Generate MD5 hash for checksum validation."""
         import hashlib
@@ -232,9 +232,9 @@ def HandleArduinoIDFsettings(env):
         """Load custom sdkconfig from file or URL if specified."""
         if not config.has_option("env:" + env["PIOENV"], "custom_sdkconfig"):
             return ""
-        
+
         sdkconfig_entries = env.GetProjectOption("custom_sdkconfig").splitlines()
-        
+
         for file_entry in sdkconfig_entries:
             # Handle HTTP/HTTPS URLs
             if "http" in file_entry and "://" in file_entry:
@@ -252,7 +252,7 @@ def HandleArduinoIDFsettings(env):
                     except UnicodeDecodeError as e:
                         print(f"Error decoding response from {file_entry}: {e}")
                         return ""
-            
+
             # Handle local files
             if "file://" in file_entry:
                 file_ref = file_entry[7:] if file_entry.startswith("file://") else file_entry
@@ -272,7 +272,7 @@ def HandleArduinoIDFsettings(env):
                 else:
                     print("File not found, check path:", file_path)
                     return ""
-        
+
         return ""
 
     def extract_flag_name(line):
@@ -287,24 +287,24 @@ def HandleArduinoIDFsettings(env):
     def build_idf_config_flags():
         """Build complete IDF configuration flags from all sources."""
         flags = []
-        
+
         # Add board-specific flags first
         if "espidf.custom_sdkconfig" in board:
             board_flags = board.get("espidf.custom_sdkconfig", [])
             if board_flags:
                 flags.extend(board_flags)
-        
+
         # Add custom sdkconfig file content
         custom_file_content = load_custom_sdkconfig_file()
         if custom_file_content:
             flags.append(custom_file_content)
-        
+
         # Add project-level custom sdkconfig
         if config.has_option("env:" + env["PIOENV"], "custom_sdkconfig"):
             custom_flags = env.GetProjectOption("custom_sdkconfig").rstrip("\n")
             if custom_flags:
                 flags.append(custom_flags)
-        
+
         return "\n".join(flags) + "\n" if flags else ""
 
     def add_flash_configuration(config_flags):
@@ -313,18 +313,18 @@ def HandleArduinoIDFsettings(env):
             config_flags += "# CONFIG_ESPTOOLPY_FLASHFREQ_80M is not set\n"
             config_flags += f"CONFIG_ESPTOOLPY_FLASHFREQ_{flash_frequency.upper()}=y\n"
             config_flags += f"CONFIG_ESPTOOLPY_FLASHFREQ=\"{flash_frequency}\"\n"
-        
+
         if flash_mode != "qio":
             config_flags += "# CONFIG_ESPTOOLPY_FLASHMODE_QIO is not set\n"
-        
+
         flash_mode_flag = f"CONFIG_ESPTOOLPY_FLASHMODE_{flash_mode.upper()}=y\n"
         if flash_mode_flag not in config_flags:
             config_flags += flash_mode_flag
-        
+
         # ESP32 specific SPIRAM configuration
         if mcu == "esp32" and "CONFIG_FREERTOS_UNICORE=y" in config_flags:
             config_flags += "# CONFIG_SPIRAM is not set\n"
-        
+
         return config_flags
 
     def write_sdkconfig_file(idf_config_flags, checksum_source):
@@ -337,27 +337,27 @@ def HandleArduinoIDFsettings(env):
         if not os.path.isfile(sdkconfig_src):
             sys.stderr.write(f"Error: Missing Arduino sdkconfig template at '{sdkconfig_src}'\n")
             env.Exit(1)
-        
+
         # Generate checksum for validation (maintains original logic)
         checksum = get_MD5_hash(checksum_source.strip() + mcu)
-        
+
         with open(sdkconfig_src, 'r', encoding='utf-8') as src, open(sdkconfig_dst, 'w', encoding='utf-8') as dst:
             # Write checksum header (critical for compilation decision logic)
             dst.write(f"# TASMOTA__{checksum}\n")
-            
+
             # Process each line from source sdkconfig
             for line in src:
                 flag_name = extract_flag_name(line)
-                
+
                 if flag_name is None:
                     dst.write(line)
                     continue
-                
+
                 # Check if we have a custom replacement for this flag
                 flag_replaced = False
                 for custom_flag in idf_config_flags[:]:  # Create copy for safe removal
                     custom_flag_name = extract_flag_name(custom_flag.replace("'", ""))
-                    
+
                     if flag_name == custom_flag_name:
                         cleaned_flag = custom_flag.replace("'", "")
                         dst.write(cleaned_flag + "\n")
@@ -365,10 +365,10 @@ def HandleArduinoIDFsettings(env):
                         idf_config_flags.remove(custom_flag)
                         flag_replaced = True
                         break
-                
+
                 if not flag_replaced:
                     dst.write(line)
-            
+
             # Add any remaining new flags
             for remaining_flag in idf_config_flags:
                 cleaned_flag = remaining_flag.replace("'", "")
@@ -380,24 +380,24 @@ def HandleArduinoIDFsettings(env):
         config.has_option("env:" + env["PIOENV"], "custom_sdkconfig") or
         "espidf.custom_sdkconfig" in board
     )
-    
+
     if not has_custom_config:
         return
-    
+
     print("*** Add \"custom_sdkconfig\" settings to IDF sdkconfig.defaults ***")
-    
+
     # Build complete configuration
     idf_config_flags = build_idf_config_flags()
     idf_config_flags = add_flash_configuration(idf_config_flags)
-    
+
     # Convert to list for processing
     idf_config_list = [line for line in idf_config_flags.splitlines() if line.strip()]
-    
+
     # Write final configuration file with checksum
     custom_sdk_config_flags = ""
     if config.has_option("env:" + env["PIOENV"], "custom_sdkconfig"):
         custom_sdk_config_flags = env.GetProjectOption("custom_sdkconfig").rstrip("\n") + "\n"
-    
+
     write_sdkconfig_file(idf_config_list, custom_sdk_config_flags)
 
 
@@ -1171,13 +1171,13 @@ def get_lib_ignore_components():
         config = _component_manager.ComponentManagerConfig(env)
         logger = _component_manager.ComponentLogger()
         lib_handler = _component_manager.LibraryIgnoreHandler(config, logger)
-        
+
         # Get the processed lib_ignore entries (already converted to component names)
         get_entries = getattr(lib_handler, "get_lib_ignore_entries", None)
         lib_ignore_entries = (
             get_entries() if callable(get_entries) else lib_handler._get_lib_ignore_entries()
         )
-        
+
         return lib_ignore_entries
     except (OSError, ValueError, RuntimeError, KeyError) as e:
         print(f"[ESP-IDF] Warning: Could not process lib_ignore: {e}")
@@ -1271,11 +1271,11 @@ def build_bootloader(sdk_config):
     )
 
     bootloader_env.MergeFlags(link_args)
-    
+
     # Handle ESP-IDF 6.0 linker script preprocessing for .ld.in files
     # In bootloader context, only .ld.in templates exist and need preprocessing
     processed_extra_flags = []
-    
+
     # Bootloader preprocessing configuration
     bootloader_config_dir = str(Path(BUILD_DIR) / "bootloader" / "config")
     bootloader_extra_includes = [
@@ -1286,28 +1286,28 @@ def build_bootloader(sdk_config):
     while i < len(extra_flags):
         if extra_flags[i] == "-T" and i + 1 < len(extra_flags):
             linker_script = extra_flags[i + 1]
-            
+
             # Process .ld.in templates directly
             if linker_script.endswith(".ld.in"):
                 script_name = os.path.basename(linker_script).replace(".ld.in", ".ld")
                 target_script = str(Path(BUILD_DIR) / "bootloader" / script_name)
-                
+
                 preprocessed_script = preprocess_linker_file(
                     linker_script,
                     target_script,
                     config_dir=bootloader_config_dir,
                     extra_include_dirs=bootloader_extra_includes
                 )
-                
+
                 bootloader_env.Depends("$BUILD_DIR/bootloader.elf", preprocessed_script)
                 processed_extra_flags.extend(["-T", target_script])
             # Handle .ld files - prioritize using original scripts when available
             elif linker_script.endswith(".ld"):
                 script_basename = os.path.basename(linker_script)
-                
+
                 # Check if the original .ld file exists in framework and use it directly
                 original_script_path = str(Path(FRAMEWORK_DIR) / "components" / "bootloader" / "subproject" / "main" / "ld" / idf_variant / script_basename)
-                
+
                 if os.path.isfile(original_script_path):
                     # Use the original script directly - no preprocessing needed
                     processed_extra_flags.extend(["-T", original_script_path])
@@ -1315,7 +1315,7 @@ def build_bootloader(sdk_config):
                     # Only generate from template if no original .ld file exists
                     script_name_in = script_basename.replace(".ld", ".ld.in")
                     bootloader_script_in_path = str(Path(FRAMEWORK_DIR) / "components" / "bootloader" / "subproject" / "main" / "ld" / idf_variant / script_name_in)
-                    
+
                     # ESP32-P4 specific: Check for bootloader.rev3.ld.in
                     if idf_variant == "esp32p4" and script_basename == "bootloader.ld":
                         sdk_config = get_sdk_configuration()
@@ -1323,18 +1323,18 @@ def build_bootloader(sdk_config):
                             bootloader_rev3_path = str(Path(FRAMEWORK_DIR) / "components" / "bootloader" / "subproject" / "main" / "ld" / idf_variant / "bootloader.rev3.ld.in")
                             if os.path.isfile(bootloader_rev3_path):
                                 bootloader_script_in_path = bootloader_rev3_path
-                    
+
                     # Preprocess the .ld.in template to generate the .ld file
                     if os.path.isfile(bootloader_script_in_path):
                         target_script = str(Path(BUILD_DIR) / "bootloader" / script_basename)
-                        
+
                         preprocessed_script = preprocess_linker_file(
                             bootloader_script_in_path,
                             target_script,
                             config_dir=bootloader_config_dir,
                             extra_include_dirs=bootloader_extra_includes
                         )
-                        
+
                         bootloader_env.Depends("$BUILD_DIR/bootloader.elf", preprocessed_script)
                         processed_extra_flags.extend(["-T", target_script])
                     else:
@@ -1347,7 +1347,7 @@ def build_bootloader(sdk_config):
         else:
             processed_extra_flags.append(extra_flags[i])
             i += 1
-    
+
     bootloader_env.Append(LINKFLAGS=processed_extra_flags)
     bootloader_libs = find_lib_deps(components_map, elf_config, link_args)
 
@@ -1532,7 +1532,7 @@ def preprocess_linker_file(src_ld_script, target_ld_script, config_dir=None, ext
     """
     Preprocess a linker script file (.ld.in) to generate the final .ld file.
     Supports both IDF 5.x (linker_script_generator.cmake) and IDF 6.x (linker_script_preprocessor.cmake).
-    
+
     Args:
         src_ld_script: Source .ld.in file path
         target_ld_script: Target .ld file path
@@ -1541,25 +1541,25 @@ def preprocess_linker_file(src_ld_script, target_ld_script, config_dir=None, ext
     """
     if config_dir is None:
         config_dir = str(Path(BUILD_DIR) / "config")
-    
+
     # Convert all paths to forward slashes for CMake compatibility on Windows
     config_dir = fs.to_unix_path(config_dir)
     src_ld_script = fs.to_unix_path(src_ld_script)
     target_ld_script = fs.to_unix_path(target_ld_script)
-    
+
     # Check IDF version to determine which CMake script to use
     framework_version_list = [int(v) for v in get_framework_version().split(".")]
-    
+
     # IDF 6.0+ uses linker_script_preprocessor.cmake with CFLAGS approach
     if framework_version_list[0] >= 6:
         include_dirs = [f'"{config_dir}"']
         include_dirs.append(f'"{fs.to_unix_path(str(Path(FRAMEWORK_DIR) / "components" / "esp_system" / "ld"))}"')
-        
+
         if extra_include_dirs:
             include_dirs.extend(f'"{fs.to_unix_path(dir_path)}"' for dir_path in extra_include_dirs)
-        
+
         cflags_value = "-I" + " -I".join(include_dirs)
-        
+
         return env.Command(
             target_ld_script,
             src_ld_script,
@@ -1662,7 +1662,7 @@ def install_python_deps():
         except (subprocess.CalledProcessError, json.JSONDecodeError, OSError) as e:
             print(f"Warning! Couldn't extract the list of installed Python packages: {e}")
             return {}
-        
+
         for p in packages:
             result[p["name"]] = pepver_to_semver(p["version"])
 
@@ -1699,7 +1699,7 @@ def install_python_deps():
 
     if packages_to_install:
         packages_str = " ".join(['"%s%s"' % (p, deps[p]) for p in packages_to_install])
-        
+
         # Use uv to install packages in the specific Python environment
         env.Execute(
             env.VerboseAction(
@@ -2125,7 +2125,7 @@ env.Prepend(
 #
 
 if "arduino" in env.subst("$PIOFRAMEWORK"):
-    arduino_candidates = [n for n in target_configs if n.startswith("__idf_framework-arduinoespressif32")]
+    arduino_candidates = [n for n in target_configs if n.startswith("__idf_framework-arduinoespressif32pio")]
     if arduino_candidates:
         arduino_cfg = target_configs.get(arduino_candidates[0], {})
         cg_list = arduino_cfg.get("compileGroups", [])
